@@ -125,7 +125,7 @@ class KMeans(nn.Module):
         """
         pts, _ = X.shape
         device = X.device
-        if not centroids:
+        if centroids is None:
             centroids = X[np.random.choice(
                 pts, size=[self.n_clusters], replace=False)]
 

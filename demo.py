@@ -23,6 +23,6 @@ kmeans = KMeans(
 )
 
 # Forward
-centroids, features = kmeans(points, features)
+centroids, features = kmeans(points, features, centroids=torch.randn(batch_size, num_cluster, pts_dim))
 
 print(centroids.shape, features.shape)
