@@ -69,7 +69,7 @@ class KMeans(nn.Module):
         """
         vec_a = vec_a.unsqueeze(1).expand(vec_a.shape[0], vec_b.shape[0], -1)
         vec_b = vec_b.unsqueeze(0).expand_as(vec_a)
-        return F.cosine_similarity(vec_a, vec_b, dim=1)
+        return F.cosine_similarity(vec_a, vec_b, dim=-1)
 
     @classmethod
     def euc_sim(cls, vec_a, vec_b):
@@ -167,11 +167,11 @@ class KMeans(nn.Module):
             closest = KMeans.predict(X, centroids, distance=self.distance)
         return closest, centroids
 
-    def forward(self, points, features, centroids=None):
+    def forward(self, points, features=None, centroids=None):
         r"""KMeans on points and then do an average aggregation on neighborhood points to get the feature for each cluster.
         Args:
             points: bz x n x 3
-            features: bz x f x n
+            features: bz x f x n, if features is given, we will aggregate the feature at the same time. 
             centroids: bz x m x 3, the initial centroids points.
 
         Returns:
@@ -181,15 +181,32 @@ class KMeans(nn.Module):
         def single_batch(pts, ft, ct):
             closest, centroids = self.fit_predict(pts, ct)
 
-            cluster_features = []
-            for cls in range(self.n_clusters):
-                cf = ft[:, closest == cls]
-                if cf.shape[1] > self.max_neighbors:
-                    cf = cf[:, :self.max_neighbors]
-                cluster_features.append(torch.mean(cf, dim=1, keepdim=True))
-            cluster_features = torch.cat(cluster_features, dim=1)
+            if ft is not None:
+                cluster_features = []
+                for cls in range(self.n_clusters):
+                    cf = ft[:, closest == cls]
+                    cp = pts[closest == cls]
 
-            return centroids, cluster_features
+                    # Compute distance to center points
+                    sim_score = KMeans.cos_sim(
+                        cp, centroids[cls:cls+1]) if self.distance == "cosine" else KMeans.euc_sim(cp, centroids[cls:cls+1])
+                    sim_score = sim_score.reshape(-1)
+                    score, index = torch.topk(sim_score, k=min(
+                        self.max_neighbors, len(cp)), largest=True)
+
+                    # Select features
+                    cf = cf[:, index]
+                    score = F.softmax(score, dim=0).reshape(1, -1)
+                    cluster_features.append(
+                        torch.sum(cf * score, dim=1, keepdim=True))
+                cluster_features = torch.cat(cluster_features, dim=1)
+
+                return centroids, cluster_features
+            else:
+                return centroids, None
+
+        features = features if features is not None else [
+            None for _ in range(len(points))]
         r_points, r_features = [], []
         for i, (pts, ft) in enumerate(zip(points, features)):
             if centroids is not None:
@@ -199,7 +216,10 @@ class KMeans(nn.Module):
             pts, ft = single_batch(pts, ft, ct)
             r_points.append(pts)
             r_features.append(ft)
-        return torch.stack(r_points, dim=0), torch.stack(r_features, dim=0)
+        if features[0] is not None:
+            return torch.stack(r_points, dim=0), torch.stack(r_features, dim=0)
+        else:
+            return torch.stack(r_points, dim=0)
 
 
 if __name__ == '__main__':

@@ -17,7 +17,7 @@ kmeans = KMeans(
     n_clusters=num_cluster,
     max_iter=10,
     tolerance=1e-4,
-    distance='cosine',
+    distance='euclidean',
     sub_sampling=128,
     max_neighbors=15,
 )
