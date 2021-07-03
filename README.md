@@ -1,6 +1,7 @@
 # kmeans-gpu
 
 kmeans-gpu with pytorch (batch version). It is faster than sklearn.cluster.KMeans.
+What's more, it is a differential operation which will back-propagate gradient to previous layers.
 
 You can easily use `KMeans` as a `nn.Module`, and embed into your network structure.
 

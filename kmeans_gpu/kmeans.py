@@ -167,6 +167,45 @@ class KMeans(nn.Module):
             closest = KMeans.predict(X, centroids, distance=self.distance)
         return closest, centroids
 
+    def single_batch_forward(self, points, features, centroids):
+        """Actually, the KMeans process is not differentiable.
+        Here, we make it as a differentiable process by using the weighted sum of cluster points.
+        """
+        closest, centroids = self.fit_predict(points, centroids)
+
+        cluster_features = []
+        cluster_centroids = []
+        for cls in range(self.n_clusters):
+            cp = points[closest == cls]
+
+            # Compute distance to center points
+            sim_score = KMeans.cos_sim(
+                cp, centroids[cls:cls+1]) if self.distance == "cosine" else KMeans.euc_sim(cp, centroids[cls:cls+1])
+            sim_score = sim_score.reshape(-1)
+            score, index = torch.topk(sim_score, k=min(
+                self.max_neighbors, len(cp)), largest=True)
+
+            score = F.softmax(score, dim=0)
+
+            # Select pts
+            cp = cp[index, :]
+            cluster_centroids.append(
+                torch.sum(cp * score.reshape(-1, 1), dim=0, keepdim=True))
+
+            # Select features
+            if features is not None:
+                cf = features[:, closest == cls]
+                cf = cf[:, index]
+                cluster_features.append(
+                    torch.sum(cf * score.reshape(1, -1), dim=1, keepdim=True))
+
+        cluster_centroids = torch.cat(cluster_centroids, dim=0)
+        if len(cluster_features) > 0:
+            cluster_features = torch.cat(cluster_features, dim=1)
+            return cluster_centroids, cluster_features
+        else:
+            return cluster_centroids, None
+
     def forward(self, points, features=None, centroids=None):
         r"""KMeans on points and then do an average aggregation on neighborhood points to get the feature for each cluster.
         Args:
@@ -178,42 +217,15 @@ class KMeans(nn.Module):
             cluster centroids: bz x cc x 3
             cluster features: bz x f x cc
         """
-        def single_batch(pts, ft, ct):
-            closest, centroids = self.fit_predict(pts, ct)
-
-            if ft is not None:
-                cluster_features = []
-                for cls in range(self.n_clusters):
-                    cf = ft[:, closest == cls]
-                    cp = pts[closest == cls]
-
-                    # Compute distance to center points
-                    sim_score = KMeans.cos_sim(
-                        cp, centroids[cls:cls+1]) if self.distance == "cosine" else KMeans.euc_sim(cp, centroids[cls:cls+1])
-                    sim_score = sim_score.reshape(-1)
-                    score, index = torch.topk(sim_score, k=min(
-                        self.max_neighbors, len(cp)), largest=True)
-
-                    # Select features
-                    cf = cf[:, index]
-                    score = F.softmax(score, dim=0).reshape(1, -1)
-                    cluster_features.append(
-                        torch.sum(cf * score, dim=1, keepdim=True))
-                cluster_features = torch.cat(cluster_features, dim=1)
-
-                return centroids, cluster_features
-            else:
-                return centroids, None
 
         features = features if features is not None else [
             None for _ in range(len(points))]
+        centroids = centroids if centroids is not None else [
+            None for _ in range(len(points))]
+
         r_points, r_features = [], []
-        for i, (pts, ft) in enumerate(zip(points, features)):
-            if centroids is not None:
-                ct = centroids[i]
-            else:
-                ct = None
-            pts, ft = single_batch(pts, ft, ct)
+        for pts, ft, ct in zip(points, features, centroids):
+            pts, ft = self.single_batch_forward(pts, ft, ct)
             r_points.append(pts)
             r_features.append(ft)
         if features[0] is not None:
