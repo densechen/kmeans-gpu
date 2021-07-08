@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 
+from dis import dis
 import numpy as np
 import torch
 import torch.nn as nn
@@ -47,7 +48,8 @@ class KMeans(nn.Module):
                  tolerance: float = 1e-4,
                  distance: str = 'euclidean',
                  sub_sampling: int = None,
-                 max_neighbors: int = 15):
+                 max_neighbors: int = 15,
+                 differentiable: int = False):
         super().__init__()
         assert distance in ['euclidean', 'cosine']
         self.n_clusters = n_clusters
@@ -56,6 +58,7 @@ class KMeans(nn.Module):
         self.distance = distance
         self.sub_sampling = sub_sampling
         self.max_neighbors = max_neighbors
+        self.differentiable = differentiable
 
     @classmethod
     def cos_sim(cls, vec_a, vec_b):
@@ -188,9 +191,12 @@ class KMeans(nn.Module):
             score = F.softmax(score, dim=0)
 
             # Select pts
-            cp = cp[index, :]
-            cluster_centroids.append(
-                torch.sum(cp * score.reshape(-1, 1), dim=0, keepdim=True))
+            if self.differentiable:
+                cp = cp[index, :]
+                cluster_centroids.append(
+                    torch.sum(cp * score.reshape(-1, 1), dim=0, keepdim=True))
+            else:
+                cluster_centroids.append(centroids[cls:cls+1])
 
             # Select features
             if features is not None:
